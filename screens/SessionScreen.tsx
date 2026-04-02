@@ -51,10 +51,7 @@ export default function SessionScreen({ navigation, route }: SessionScreenProps)
   const [hasPermission, setHasPermission] = React.useState<boolean|null>(null);
   React.useEffect(() => { Camera.requestCameraPermissionsAsync().then(({granted}) => setHasPermission(granted)); }, []);
 
-  const { pose, isLoading } = usePoseDetection();
-  const isModelLoaded = !isLoading;
-  const keypoints = pose?.keypoints || {};
-  const confidence = pose?.detected ? 0.8 : 0;
+  const { keypoints, confidence, isModelLoaded } = usePoseDetection();
 
   const {
     shotCount,
