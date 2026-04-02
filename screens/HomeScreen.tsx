@@ -50,11 +50,7 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newProfile, setNewProfile] = useState<PlayerProfile>(defaultProfile());
 
-  useFocusEffect(
-    useCallback(() => {
-      loadProfiles();
-    }, [])
-  );
+  useEffect(() => { loadProfiles(); }, []);
 
   async function loadProfiles() {
     try {
