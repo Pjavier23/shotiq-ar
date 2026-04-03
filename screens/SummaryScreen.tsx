@@ -33,7 +33,6 @@ interface SessionData {
 
 interface SummaryScreenProps {
   navigation: any;
-  route: { params: { session: SessionData; profile: PlayerProfile } };
 }
 
 function formatDuration(seconds: number): string {
@@ -42,8 +41,9 @@ function formatDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export default function SummaryScreen({ navigation, route }: SummaryScreenProps) {
-  const { session, profile } = route.params;
+export default function SummaryScreen({ navigate, sessionData }: { navigate: (s: any) => void; sessionData?: any }) {
+  const session = sessionData || {};
+  const profile = null;
 
   const tips = generateCoachingTips({
     makes: session.makes,
