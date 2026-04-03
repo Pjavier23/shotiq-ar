@@ -64,7 +64,7 @@ export default function SessionScreen({ navigate }: { navigate: (s: any, data?: 
     markShot,
     resetSession,
   } = useShootingAnalysis({
-    handedness: profile.handedness,
+    handedness: (profile as any)?.handedness ?? 'right',
     frameWidth: 100,
     frameHeight: 100,
   });
