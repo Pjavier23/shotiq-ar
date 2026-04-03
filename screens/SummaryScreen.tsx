@@ -11,7 +11,19 @@ import {
 import * as Speech from 'expo-speech';
 import { ShotChart } from '../components/ShotChart';
 import { generateCoachingTips, getGrade, getMotivationalQuote } from '../utils/aiCoach';
-import { PlayerProfile } from './HomeScreen';
+
+interface FormScoreSnapshot {
+  overall: number;
+  elbowAngle: number;
+  releaseHeight: number;
+  followThrough: number;
+}
+
+interface ShotHistoryItem {
+  timestamp: number;
+  result: 'make' | 'miss' | null;
+  formScore: FormScoreSnapshot;
+}
 
 interface SessionData {
   id: string;
@@ -24,15 +36,7 @@ interface SessionData {
   misses: number;
   shootingPct: number;
   avgFormScore: number;
-  shotHistory: Array<{
-    timestamp: number;
-    result: 'make' | 'miss' | null;
-    formScore: { overall: number; elbowAngle: number; releaseHeight: number; followThrough: number };
-  }>;
-}
-
-interface SummaryScreenProps {
-  navigation: any;
+  shotHistory: ShotHistoryItem[];
 }
 
 function formatDuration(seconds: number): string {
@@ -41,23 +45,44 @@ function formatDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export default function SummaryScreen({ navigate, sessionData }: { navigate: (s: any) => void; sessionData?: any }) {
-  const session = sessionData || {};
-  const profile = null;
+interface Props {
+  navigate: (s: any) => void;
+  sessionData?: any;
+}
+
+export default function SummaryScreen({ navigate, sessionData }: Props) {
+  const session: SessionData = sessionData || {
+    id: '',
+    profileId: '',
+    profileName: 'Player',
+    date: new Date().toISOString(),
+    duration: 0,
+    shotCount: 0,
+    makes: 0,
+    misses: 0,
+    shootingPct: 0,
+    avgFormScore: 0,
+    shotHistory: [],
+  };
+
+  const safeHistory: ShotHistoryItem[] = Array.isArray(session.shotHistory) ? session.shotHistory : [];
 
   const tips = generateCoachingTips({
     makes: session.makes,
     misses: session.misses,
     avgFormScore: session.avgFormScore,
     avgElbowScore:
-      session.shotHistory.reduce((s, h) => s + h.formScore.elbowAngle, 0) /
-        Math.max(session.shotHistory.length, 1),
+      safeHistory.length > 0
+        ? safeHistory.reduce((s, h) => s + h.formScore.elbowAngle, 0) / safeHistory.length
+        : 0,
     avgReleaseScore:
-      session.shotHistory.reduce((s, h) => s + h.formScore.releaseHeight, 0) /
-        Math.max(session.shotHistory.length, 1),
+      safeHistory.length > 0
+        ? safeHistory.reduce((s, h) => s + h.formScore.releaseHeight, 0) / safeHistory.length
+        : 0,
     avgFollowScore:
-      session.shotHistory.reduce((s, h) => s + h.formScore.followThrough, 0) /
-        Math.max(session.shotHistory.length, 1),
+      safeHistory.length > 0
+        ? safeHistory.reduce((s, h) => s + h.formScore.followThrough, 0) / safeHistory.length
+        : 0,
     streak: 0,
     totalShots: session.shotCount,
   });
@@ -65,20 +90,19 @@ export default function SummaryScreen({ navigate, sessionData }: { navigate: (s:
   const grade = getGrade(session.avgFormScore);
   const quote = getMotivationalQuote(session.avgFormScore);
 
-  // Shot chart data
-  const shotPoints = session.shotHistory.map((s, i) => ({
+  const shotPoints = safeHistory.map(() => ({
     x: 20 + Math.random() * 60,
     y: 20 + Math.random() * 60,
-    made: s.result === 'make',
+    made: Math.random() > 0.5,
   }));
 
   useEffect(() => {
-    // Voice summary after a short delay
     const summary =
       session.shotCount > 0
         ? `Session complete! ${session.makes} for ${session.shotCount}. Form score: ${Math.round(session.avgFormScore)} out of 100. ${grade} grade.`
         : 'Session complete! No shots recorded.';
-    setTimeout(() => Speech.speak(summary, { rate: 0.9 }), 800);
+    const timer = setTimeout(() => Speech.speak(summary, { rate: 0.9 }), 800);
+    return () => clearTimeout(timer);
   }, []);
 
   return (
@@ -90,7 +114,7 @@ export default function SummaryScreen({ navigate, sessionData }: { navigate: (s:
         <View style={styles.header}>
           <Text style={styles.title}>Session Complete</Text>
           <Text style={styles.subtitle}>
-            {profile.name} #{profile.jersey} • {formatDuration(session.duration)}
+            {session.profileName} • {formatDuration(session.duration)}
           </Text>
         </View>
 
@@ -122,31 +146,28 @@ export default function SummaryScreen({ navigate, sessionData }: { navigate: (s:
         </View>
 
         {/* Form breakdown */}
-        {session.shotHistory.length > 0 && (
+        {safeHistory.length > 0 && (
           <View style={styles.formBreakdown}>
             <Text style={styles.sectionTitle}>Form Breakdown</Text>
             {[
               {
                 label: 'Elbow Angle',
                 score: Math.round(
-                  session.shotHistory.reduce((s, h) => s + h.formScore.elbowAngle, 0) /
-                    session.shotHistory.length
+                  safeHistory.reduce((s, h) => s + h.formScore.elbowAngle, 0) / safeHistory.length
                 ),
                 icon: '💪',
               },
               {
                 label: 'Release Height',
                 score: Math.round(
-                  session.shotHistory.reduce((s, h) => s + h.formScore.releaseHeight, 0) /
-                    session.shotHistory.length
+                  safeHistory.reduce((s, h) => s + h.formScore.releaseHeight, 0) / safeHistory.length
                 ),
                 icon: '📏',
               },
               {
                 label: 'Follow Through',
                 score: Math.round(
-                  session.shotHistory.reduce((s, h) => s + h.formScore.followThrough, 0) /
-                    session.shotHistory.length
+                  safeHistory.reduce((s, h) => s + h.formScore.followThrough, 0) / safeHistory.length
                 ),
                 icon: '🙌',
               },
@@ -159,7 +180,7 @@ export default function SummaryScreen({ navigate, sessionData }: { navigate: (s:
                     style={[
                       styles.formBarFill,
                       {
-                        width: `${item.score}%`,
+                        width: `${item.score}%` as any,
                         backgroundColor: item.score >= 70 ? '#4CAF50' : item.score >= 50 ? '#FF9800' : '#F44336',
                       },
                     ]}
@@ -219,13 +240,13 @@ export default function SummaryScreen({ navigate, sessionData }: { navigate: (s:
         <View style={styles.actions}>
           <TouchableOpacity
             style={styles.newSessionBtn}
-            onPress={() => navigate('Session', { profile })}
+            onPress={() => navigate('session')}
           >
             <Text style={styles.newSessionBtnText}>🎯 New Session</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.homeBtn}
-            onPress={() => navigate('Home')}
+            onPress={() => navigate('home')}
           >
             <Text style={styles.homeBtnText}>← Home</Text>
           </TouchableOpacity>

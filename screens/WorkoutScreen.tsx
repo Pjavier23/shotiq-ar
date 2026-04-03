@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  SafeAreaView, Alert
+  SafeAreaView
 } from 'react-native';
 import { CameraView, Camera } from 'expo-camera';
-import { usePoseDetection } from '../hooks/usePoseDetection';
 import { useExerciseCounter, ExerciseType } from '../hooks/useExerciseCounter';
 
 const ORANGE = '#f97316';
@@ -24,8 +23,8 @@ export default function WorkoutScreen({ navigate }: Props) {
   const [selectedExercise, setSelectedExercise] = useState<ExerciseType>('pushup');
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isActive, setIsActive] = useState(false);
-  const { keypoints, confidence } = usePoseDetection();
-  const { count, reset } = useExerciseCounter({ exerciseType: selectedExercise });
+  const [facing, setFacing] = useState<'front' | 'back'>('front');
+  const { count, reset } = useExerciseCounter({ exerciseType: selectedExercise, isActive });
 
   useEffect(() => {
     Camera.requestCameraPermissionsAsync().then(({ granted }) => setHasPermission(granted));
@@ -52,7 +51,7 @@ export default function WorkoutScreen({ navigate }: Props) {
             <TouchableOpacity
               key={ex.type}
               style={[styles.tab, selectedExercise === ex.type && styles.tabActive]}
-              onPress={() => { setSelectedExercise(ex.type); reset(); }}
+              onPress={() => { setSelectedExercise(ex.type); reset(); setIsActive(false); }}
             >
               <Text style={styles.tabEmoji}>{ex.emoji}</Text>
               <Text style={[styles.tabLabel, selectedExercise === ex.type && styles.tabLabelActive]}>
@@ -65,11 +64,21 @@ export default function WorkoutScreen({ navigate }: Props) {
         {/* Camera / counter area */}
         <View style={styles.cameraWrap}>
           {hasPermission && isActive ? (
-            <CameraView style={StyleSheet.absoluteFill} facing="front" />
+            <CameraView style={StyleSheet.absoluteFill} facing={facing} />
           ) : (
             <View style={styles.cameraPlaceholder}>
               <Text style={styles.exerciseEmoji}>{exercise.emoji}</Text>
             </View>
+          )}
+
+          {/* Camera toggle button */}
+          {hasPermission && isActive && (
+            <TouchableOpacity
+              style={styles.cameraToggle}
+              onPress={() => setFacing(f => f === 'back' ? 'front' : 'back')}
+            >
+              <Text style={styles.cameraToggleText}>🔄</Text>
+            </TouchableOpacity>
           )}
 
           {/* Counter overlay */}
@@ -77,6 +86,9 @@ export default function WorkoutScreen({ navigate }: Props) {
             <Text style={styles.countNum}>{count}</Text>
             <Text style={styles.countLabel}>{exercise.label}</Text>
             <Text style={styles.calories}>🔥 {calories} cal</Text>
+            {isActive && (
+              <Text style={styles.sensorInfo}>📱 Motion sensor active</Text>
+            )}
           </View>
         </View>
 
@@ -88,13 +100,13 @@ export default function WorkoutScreen({ navigate }: Props) {
           >
             <Text style={styles.btnText}>{isActive ? '⏹ Stop' : '▶ Start'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.btnReset} onPress={reset}>
+          <TouchableOpacity style={styles.btnReset} onPress={() => { reset(); setIsActive(false); }}>
             <Text style={styles.btnResetText}>🔄 Reset</Text>
           </TouchableOpacity>
         </View>
 
         {!hasPermission && (
-          <Text style={styles.permText}>📷 Allow camera for pose detection</Text>
+          <Text style={styles.permText}>📷 Allow camera for video view</Text>
         )}
       </View>
     </SafeAreaView>
@@ -116,10 +128,23 @@ const styles = StyleSheet.create({
   cameraWrap: { flex: 1, borderRadius: 20, overflow: 'hidden', marginBottom: 20, backgroundColor: '#1a1a1a' },
   cameraPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   exerciseEmoji: { fontSize: 80 },
+  cameraToggle: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 24,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cameraToggleText: { fontSize: 22 },
   counterOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 24, alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)' },
   countNum: { fontSize: 80, fontWeight: '900', color: ORANGE, lineHeight: 90 },
   countLabel: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 4 },
   calories: { color: '#888', fontSize: 14 },
+  sensorInfo: { color: '#666', fontSize: 11, marginTop: 4 },
   controls: { flexDirection: 'row', gap: 12 },
   btn: { flex: 1, padding: 18, borderRadius: 16, alignItems: 'center' },
   btnStart: { backgroundColor: ORANGE },

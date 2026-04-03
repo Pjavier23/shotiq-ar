@@ -1,5 +1,5 @@
-// SessionScreen.tsx - Camera + pose detection + live stats
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+// SessionScreen.tsx - Camera + accelerometer shot detection + live stats
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,30 +8,20 @@ import {
   Animated,
   Dimensions,
   Alert,
-  Platform,
 } from 'react-native';
 
+import { CameraView, Camera } from 'expo-camera';
 import * as Speech from 'expo-speech';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DeviceMotion } from 'expo-sensors';
 
-import { SkeletonOverlay } from '../components/SkeletonOverlay';
 import { StatsHUD } from '../components/StatsHUD';
 import { NBAJamChant } from '../components/NBAJamChant';
-import { usePoseDetection } from '../hooks/usePoseDetection';
 import { useShootingAnalysis } from '../hooks/useShootingAnalysis';
 import { PlayerProfile } from './HomeScreen';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const SESSION_STORAGE_KEY = '@shotiq_sessions';
-
-// NBA Jam chant progression based on consecutive makes
-const CHANTS = [
-  null,                    // 0 makes
-  null,                    // 1 make
-  "He's heating up!",     // 2 consecutive
-  "He's on fire!",         // 3 consecutive
-  'BOOM SHAKALAKA!',       // 4+ consecutive
-];
 
 function getChant(streak: number): string | null {
   if (streak >= 4) return 'BOOM SHAKALAKA!';
@@ -40,17 +30,15 @@ function getChant(streak: number): string | null {
   return null;
 }
 
-interface SessionScreenProps {
-  navigation: any;
-  }
-
 export default function SessionScreen({ navigate }: { navigate: (s: any, data?: any) => void }) {
-  const profile = null;
-  const facing: CameraType = 'back';
-  const [hasPermission, setHasPermission] = React.useState<boolean|null>(null);
-  React.useEffect(() => { Camera.requestCameraPermissionsAsync().then(({granted}) => setHasPermission(granted)); }, []);
+  const profile: PlayerProfile | null = null;
 
-  const { keypoints, confidence, isModelLoaded } = usePoseDetection();
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [facing, setFacing] = useState<'front' | 'back'>('back');
+
+  useEffect(() => {
+    Camera.requestCameraPermissionsAsync().then(({ granted }) => setHasPermission(granted));
+  }, []);
 
   const {
     shotCount,
@@ -64,7 +52,7 @@ export default function SessionScreen({ navigate }: { navigate: (s: any, data?: 
     markShot,
     resetSession,
   } = useShootingAnalysis({
-    handedness: (profile as any)?.handedness ?? 'right',
+    handedness: 'right',
     frameWidth: 100,
     frameHeight: 100,
   });
@@ -74,25 +62,80 @@ export default function SessionScreen({ navigate }: { navigate: (s: any, data?: 
   const [chantText, setChantText] = useState<string | null>(null);
   const [showChant, setShowChant] = useState(false);
   const [shotPopup, setShotPopup] = useState<'make' | 'miss' | null>(null);
-  const [sessionStarted, setSessionStarted] = useState(false);
+  const [shotDetected, setShotDetected] = useState(false);
 
   const popupAnim = useRef(new Animated.Value(0)).current;
   const sessionStartTime = useRef<number>(Date.now());
   const prevStreakRef = useRef(0);
   const prevShotCountRef = useRef(0);
   const chantTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const popupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Request camera permission
+  // Accelerometer shot detection state
+  const motionHistoryRef = useRef<{ rotation: { alpha: number; beta: number; gamma: number }; ts: number }[]>([]);
+  const lastShotDetectedRef = useRef<number>(0);
+  const armRaisedRef = useRef(false);
+  const SHOT_COOLDOWN_MS = 1500;
+
+  // DeviceMotion for shot detection
   useEffect(() => {
-    Camera.requestCameraPermissionsAsync().then(({granted}) => setHasPermission(granted));
+    DeviceMotion.setUpdateInterval(80);
+    const sub = DeviceMotion.addListener((data) => {
+      if (!data.rotation) return;
+      const { alpha, beta, gamma } = data.rotation;
+      const now = Date.now();
+
+      // Keep short history for pattern matching
+      motionHistoryRef.current = [
+        ...motionHistoryRef.current.slice(-10),
+        { rotation: { alpha, beta, gamma }, ts: now },
+      ];
+
+      const history = motionHistoryRef.current;
+      if (history.length < 5) return;
+
+      // Shooting motion: phone tilts back (beta increases) as arm raises,
+      // then snaps forward (beta decreases quickly) at release.
+      // beta ~= forward/backward tilt in radians
+      const recent = history.slice(-3).map(h => h.rotation.beta);
+      const older  = history.slice(-8, -3).map(h => h.rotation.beta);
+
+      const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
+      const olderAvg  = older.length > 0 ? older.reduce((a, b) => a + b, 0) / older.length : recentAvg;
+
+      // Arm raise: beta tilts toward negative (phone tilting back/up)
+      // Release: beta snaps back quickly
+      const tiltDelta = recentAvg - olderAvg; // positive = phone tips forward (release)
+      const armRaisedThreshold = -0.3; // radians tilt back
+      const releaseThreshold   =  0.35; // radians snap forward
+
+      if (recentAvg < armRaisedThreshold) {
+        armRaisedRef.current = true;
+      }
+
+      if (armRaisedRef.current && tiltDelta > releaseThreshold) {
+        const timeSinceLast = now - lastShotDetectedRef.current;
+        if (timeSinceLast > SHOT_COOLDOWN_MS) {
+          lastShotDetectedRef.current = now;
+          armRaisedRef.current = false;
+
+          // Auto-mark as shot (user can override with ✓/✗ buttons)
+          markShot('make');
+
+          // Show detection indicator
+          setShotDetected(true);
+          setTimeout(() => setShotDetected(false), 1200);
+        }
+      }
+    });
+
+    return () => sub.remove();
+  }, [markShot]);
 
   // Detect new shots via shotCount changes
   useEffect(() => {
     if (shotCount > prevShotCountRef.current) {
       prevShotCountRef.current = shotCount;
-      const result = lastShotResult;
-      showShotPopup(result);
+      showShotPopup(lastShotResult);
     }
   }, [shotCount, lastShotResult]);
 
@@ -111,7 +154,6 @@ export default function SessionScreen({ navigate }: { navigate: (s: any, data?: 
     if (!result) return;
     setShotPopup(result);
 
-    if (popupTimeoutRef.current) clearTimeout(popupTimeoutRef.current);
     Animated.sequence([
       Animated.spring(popupAnim, {
         toValue: 1,
@@ -154,11 +196,10 @@ export default function SessionScreen({ navigate }: { navigate: (s: any, data?: 
   async function endSession() {
     const duration = Math.round((Date.now() - sessionStartTime.current) / 1000);
 
-    // Save session to AsyncStorage
     const sessionData = {
       id: Date.now().toString(),
-      profileId: profile.id,
-      profileName: profile.name,
+      profileId: profile?.id ?? 'guest',
+      profileName: profile?.name ?? 'Guest',
       date: new Date().toISOString(),
       duration,
       shotCount,
@@ -174,46 +215,31 @@ export default function SessionScreen({ navigate }: { navigate: (s: any, data?: 
       const sessions = existing ? JSON.parse(existing) : [];
       sessions.unshift(sessionData);
       await AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessions.slice(0, 100)));
-
-      // Update profile stats
-      const profilesJson = await AsyncStorage.getItem('@shotiq_profiles');
-      if (profilesJson) {
-        const profiles: PlayerProfile[] = JSON.parse(profilesJson);
-        const updated = profiles.map((p) => {
-          if (p.id === profile.id) {
-            return {
-              ...p,
-              sessionsPlayed: p.sessionsPlayed + 1,
-              totalMakes: p.totalMakes + makes,
-              totalShots: p.totalShots + shotCount,
-            };
-          }
-          return p;
-        });
-        await AsyncStorage.setItem('@shotiq_profiles', JSON.stringify(updated));
-      }
     } catch (err) {
       console.error('Failed to save session:', err);
     }
 
-    navigate('Summary', { session: sessionData, profile });
+    navigate('summary', { session: sessionData });
+  }
+
+  if (hasPermission === null) {
+    return (
+      <View style={styles.permissionContainer}>
+        <Text style={styles.permissionText}>📷 Requesting camera...</Text>
+      </View>
+    );
   }
 
   if (!hasPermission) {
     return (
       <View style={styles.permissionContainer}>
         <Text style={styles.permissionText}>📷 Camera access needed</Text>
-        <TouchableOpacity style={styles.permissionBtn} onPress={requestPermission}>
+        <TouchableOpacity
+          style={styles.permissionBtn}
+          onPress={() => Camera.requestCameraPermissionsAsync().then(({ granted }) => setHasPermission(granted))}
+        >
           <Text style={styles.permissionBtnText}>Grant Permission</Text>
         </TouchableOpacity>
-      </View>
-    );
-  }
-
-  if (!device) {
-    return (
-      <View style={styles.permissionContainer}>
-        <Text style={styles.permissionText}>No camera found</Text>
       </View>
     );
   }
@@ -226,19 +252,9 @@ export default function SessionScreen({ navigate }: { navigate: (s: any, data?: 
         activeOpacity={1}
         onPress={handleHoopTap}
       >
-        <Camera
+        <CameraView
           style={StyleSheet.absoluteFill}
-          device={device}
-          isActive={true}
-          photo={false}
-          video={false}
-        />
-
-        {/* Skeleton overlay */}
-        <SkeletonOverlay
-          keypoints={keypoints}
-          width={SCREEN_W}
-          height={SCREEN_H}
+          facing={facing}
         />
 
         {/* Hoop marker */}
@@ -265,11 +281,18 @@ export default function SessionScreen({ navigate }: { navigate: (s: any, data?: 
         shootingPct={shootingPct}
         formScore={currentFormScore?.overall ?? null}
         streak={streak}
-        confidence={confidence}
+        confidence={0}
       />
 
       {/* NBA Jam Chant */}
       <NBAJamChant chant={chantText} visible={showChant} />
+
+      {/* Shot Detected Banner */}
+      {shotDetected && (
+        <View style={styles.shotDetectedBanner}>
+          <Text style={styles.shotDetectedText}>🏀 Shot Detected!</Text>
+        </View>
+      )}
 
       {/* Make/Miss Popup */}
       {shotPopup && (
@@ -284,19 +307,7 @@ export default function SessionScreen({ navigate }: { navigate: (s: any, data?: 
           <Text style={styles.shotPopupText}>
             {shotPopup === 'make' ? '✅ GOOD!' : '❌ MISS'}
           </Text>
-          {currentFormScore && (
-            <Text style={styles.shotPopupScore}>
-              Form: {currentFormScore.overall}/100
-            </Text>
-          )}
         </Animated.View>
-      )}
-
-      {/* Model loading indicator */}
-      {!isModelLoaded && (
-        <View style={styles.loadingBanner}>
-          <Text style={styles.loadingText}>⚡ Loading AI model...</Text>
-        </View>
       )}
 
       {/* Bottom controls */}
@@ -309,6 +320,14 @@ export default function SessionScreen({ navigate }: { navigate: (s: any, data?: 
           <Text style={styles.controlBtnText}>
             {isSettingHoop ? '📍 Tap Hoop' : '🏀 Set Hoop'}
           </Text>
+        </TouchableOpacity>
+
+        {/* Camera Toggle */}
+        <TouchableOpacity
+          style={styles.controlBtn}
+          onPress={() => setFacing(f => f === 'back' ? 'front' : 'back')}
+        >
+          <Text style={styles.controlBtnText}>🔄</Text>
         </TouchableOpacity>
 
         {/* Manual Make/Miss */}
@@ -365,6 +384,17 @@ const styles = StyleSheet.create({
   },
   hoopIcon: { fontSize: 30 },
 
+  shotDetectedBanner: {
+    position: 'absolute',
+    top: SCREEN_H * 0.15,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(249, 115, 22, 0.9)',
+    borderRadius: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+  },
+  shotDetectedText: { color: '#fff', fontSize: 18, fontWeight: '900' },
+
   shotPopup: {
     position: 'absolute',
     alignSelf: 'center',
@@ -392,22 +422,6 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 2,
   },
-  shotPopupScore: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 14,
-    marginTop: 4,
-  },
-
-  loadingBanner: {
-    position: 'absolute',
-    bottom: 120,
-    alignSelf: 'center',
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  loadingText: { color: '#FF9800', fontSize: 13, fontWeight: '600' },
 
   bottomControls: {
     position: 'absolute',
