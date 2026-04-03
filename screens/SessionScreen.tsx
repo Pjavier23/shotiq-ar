@@ -85,8 +85,7 @@ export default function SessionScreen({ navigate }: { navigate: (s: any, data?: 
 
   // Request camera permission
   useEffect(() => {
-    if (!hasPermission) requestPermission();
-  }, [hasPermission, requestPermission]);
+    Camera.requestCameraPermissionsAsync().then(({granted}) => setHasPermission(granted));
 
   // Detect new shots via shotCount changes
   useEffect(() => {
