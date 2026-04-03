@@ -1,287 +1,131 @@
-// WorkoutScreen.tsx - Push-ups, jumping jacks, run in place
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  StatusBar,
-  Dimensions,
+  View, Text, StyleSheet, TouchableOpacity,
+  SafeAreaView, Alert
 } from 'react-native';
-
-import * as Speech from 'expo-speech';
-import { SkeletonOverlay } from '../components/SkeletonOverlay';
+import { CameraView, Camera } from 'expo-camera';
 import { usePoseDetection } from '../hooks/usePoseDetection';
 import { useExerciseCounter, ExerciseType } from '../hooks/useExerciseCounter';
-import { CameraView, Camera } from 'expo-camera';
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+const ORANGE = '#f97316';
+const BG = '#0a0a0a';
 
-const EXERCISES: { type: ExerciseType; label: string; icon: string; goal: number }[] = [
-  { type: 'pushup', label: 'Push-Ups', icon: '💪', goal: 20 },
-  { type: 'jumpingjack', label: 'Jumping Jacks', icon: '🕺', goal: 30 },
-  { type: 'run', label: 'Run in Place', icon: '🏃', goal: 50 },
+const EXERCISES = [
+  { type: 'pushup' as ExerciseType, label: 'Push-ups', emoji: '🏋️', goal: 20, cal: 0.5 },
+  { type: 'jumpingjack' as ExerciseType, label: 'Jumping Jacks', emoji: '⭐', goal: 30, cal: 0.2 },
+  { type: 'run' as ExerciseType, label: 'Run in Place', emoji: '🏃', goal: 50, cal: 0.1 },
 ];
 
-interface WorkoutScreenProps {
-  navigation: any;
-  route: { params: { profile?: any } };
+interface Props {
+  navigate: (s: any, data?: any) => void;
 }
 
-export default function WorkoutScreen({ navigation }: WorkoutScreenProps) {
+export default function WorkoutScreen({ navigate }: Props) {
   const [selectedExercise, setSelectedExercise] = useState<ExerciseType>('pushup');
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isActive, setIsActive] = useState(false);
-
-  const facing = 'front'; // Front cam for workouts
-  const [hasPermission, setHasPermission] = React.useState<boolean|null>(null);
-  React.useEffect(() => { Camera.requestCameraPermissionsAsync().then(({granted}) => setHasPermission(granted)); }, []);
   const { keypoints, confidence } = usePoseDetection();
   const { count, reset } = useExerciseCounter({ exerciseType: selectedExercise });
 
-  const exercise = EXERCISES.find((e) => e.type === selectedExercise)!;
-  const progress = Math.min(count / exercise.goal, 1);
-  const progressPct = Math.round(progress * 100);
+  useEffect(() => {
+    Camera.requestCameraPermissionsAsync().then(({ granted }) => setHasPermission(granted));
+  }, []);
 
-  function startWorkout() {
-    reset();
-    setIsActive(true);
-    Speech.speak(`Starting ${exercise.label}. Go!`, { rate: 1.0 });
-  }
-
-  function stopWorkout() {
-    setIsActive(false);
-    Speech.speak(`Nice work! You did ${count} ${exercise.label}.`, { rate: 0.9 });
-  }
-
-  if (!hasPermission) {
-    return (
-      <View style={styles.permContainer}>
-        <Text style={styles.permText}>📷 Camera needed for workout tracking</Text>
-        <TouchableOpacity style={styles.permBtn} onPress={requestPermission}>
-          <Text style={styles.permBtnText}>Grant Permission</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  const exercise = EXERCISES.find(e => e.type === selectedExercise)!;
+  const calories = (count * exercise.cal).toFixed(1);
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
-
-      {/* Camera background when active */}
-      {isActive && hasPermission ? (
-        <>
-          <CameraView
-            style={StyleSheet.absoluteFill}
-            facing={facing}
-          />
-          <SkeletonOverlay
-            keypoints={keypoints}
-            width={SCREEN_W}
-            height={SCREEN_H}
-            color="#00E5FF"
-          />
-        </>
-      ) : (
-        <View style={styles.inactiveBg} />
-      )}
-
-      {/* Overlay */}
-      <View style={[styles.overlay, !isActive && styles.overlayFull]}>
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigate('home')}>
-            <Text style={styles.backBtn}>←</Text>
+            <Text style={styles.back}>‹ Back</Text>
           </TouchableOpacity>
           <Text style={styles.title}>Workout Mode</Text>
-          <View style={{ width: 32 }} />
+          <View style={{ width: 60 }} />
         </View>
 
         {/* Exercise selector */}
-        {!isActive && (
-          <View style={styles.exerciseSelector}>
-            {EXERCISES.map((ex) => (
-              <TouchableOpacity
-                key={ex.type}
-                style={[
-                  styles.exerciseCard,
-                  selectedExercise === ex.type && styles.exerciseCardActive,
-                ]}
-                onPress={() => setSelectedExercise(ex.type)}
-              >
-                <Text style={styles.exerciseIcon}>{ex.icon}</Text>
-                <Text style={styles.exerciseLabel}>{ex.label}</Text>
-                <Text style={styles.exerciseGoal}>Goal: {ex.goal}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {/* Counter display */}
-        <View style={styles.counterSection}>
-          <Text style={styles.exerciseDisplay}>
-            {exercise.icon} {exercise.label}
-          </Text>
-          <Text style={styles.counter}>{count}</Text>
-          <Text style={styles.counterGoal}>/ {exercise.goal}</Text>
-
-          {/* Progress bar */}
-          <View style={styles.progressBg}>
-            <View
-              style={[styles.progressFill, { width: `${progressPct}%` }]}
-            />
-          </View>
-          <Text style={styles.progressText}>{progressPct}%</Text>
-
-          {count >= exercise.goal && (
-            <Text style={styles.goalReached}>🎉 Goal Reached!</Text>
-          )}
+        <View style={styles.tabs}>
+          {EXERCISES.map(ex => (
+            <TouchableOpacity
+              key={ex.type}
+              style={[styles.tab, selectedExercise === ex.type && styles.tabActive]}
+              onPress={() => { setSelectedExercise(ex.type); reset(); }}
+            >
+              <Text style={styles.tabEmoji}>{ex.emoji}</Text>
+              <Text style={[styles.tabLabel, selectedExercise === ex.type && styles.tabLabelActive]}>
+                {ex.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
-        {/* Start/Stop button */}
-        <View style={styles.bottomControls}>
-          {!isActive ? (
-            <TouchableOpacity style={styles.startBtn} onPress={startWorkout}>
-              <Text style={styles.startBtnText}>▶ Start</Text>
-            </TouchableOpacity>
+        {/* Camera / counter area */}
+        <View style={styles.cameraWrap}>
+          {hasPermission && isActive ? (
+            <CameraView style={StyleSheet.absoluteFill} facing="front" />
           ) : (
-            <View style={styles.activeControls}>
-              <TouchableOpacity style={styles.resetBtn} onPress={() => reset()}>
-                <Text style={styles.resetBtnText}>Reset</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.stopBtn} onPress={stopWorkout}>
-                <Text style={styles.stopBtnText}>■ Stop</Text>
-              </TouchableOpacity>
+            <View style={styles.cameraPlaceholder}>
+              <Text style={styles.exerciseEmoji}>{exercise.emoji}</Text>
             </View>
           )}
+
+          {/* Counter overlay */}
+          <View style={styles.counterOverlay}>
+            <Text style={styles.countNum}>{count}</Text>
+            <Text style={styles.countLabel}>{exercise.label}</Text>
+            <Text style={styles.calories}>🔥 {calories} cal</Text>
+          </View>
         </View>
+
+        {/* Controls */}
+        <View style={styles.controls}>
+          <TouchableOpacity
+            style={[styles.btn, isActive ? styles.btnStop : styles.btnStart]}
+            onPress={() => setIsActive(!isActive)}
+          >
+            <Text style={styles.btnText}>{isActive ? '⏹ Stop' : '▶ Start'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.btnReset} onPress={reset}>
+            <Text style={styles.btnResetText}>🔄 Reset</Text>
+          </TouchableOpacity>
+        </View>
+
+        {!hasPermission && (
+          <Text style={styles.permText}>📷 Allow camera for pose detection</Text>
+        )}
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0a0a0a' },
-  inactiveBg: { ...StyleSheet.absoluteFillObject, backgroundColor: '#0a0a0a' },
-  overlay: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingBottom: 40,
-  },
-  overlayFull: { backgroundColor: '#0a0a0a' },
-
-  permContainer: {
-    flex: 1,
-    backgroundColor: '#0a0a0a',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 16,
-  },
-  permText: { color: '#fff', fontSize: 16, textAlign: 'center', paddingHorizontal: 32 },
-  permBtn: {
-    backgroundColor: '#FF6B00',
-    borderRadius: 12,
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-  },
-  permBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
-
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 60,
-    marginBottom: 24,
-  },
-  backBtn: { color: '#FF6B00', fontSize: 24, fontWeight: '700' },
-  title: { color: '#fff', fontSize: 20, fontWeight: '800' },
-
-  exerciseSelector: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 32,
-  },
-  exerciseCard: {
-    flex: 1,
-    backgroundColor: '#1a1a1a',
-    borderRadius: 14,
-    padding: 14,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-  exerciseCardActive: {
-    borderColor: '#00E5FF',
-    backgroundColor: 'rgba(0, 229, 255, 0.1)',
-  },
-  exerciseIcon: { fontSize: 28, marginBottom: 6 },
-  exerciseLabel: { color: '#fff', fontSize: 12, fontWeight: '700', textAlign: 'center' },
-  exerciseGoal: { color: '#666', fontSize: 11, marginTop: 2 },
-
-  counterSection: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  exerciseDisplay: {
-    color: '#00E5FF',
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 16,
-  },
-  counter: {
-    color: '#fff',
-    fontSize: 96,
-    fontWeight: '900',
-    lineHeight: 100,
-  },
-  counterGoal: { color: '#555', fontSize: 24, marginTop: 4 },
-  progressBg: {
-    width: 200,
-    height: 8,
-    backgroundColor: '#222',
-    borderRadius: 4,
-    marginTop: 20,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#00E5FF',
-    borderRadius: 4,
-  },
-  progressText: { color: '#666', fontSize: 13, marginTop: 6 },
-  goalReached: {
-    color: '#4CAF50',
-    fontSize: 22,
-    fontWeight: '800',
-    marginTop: 16,
-  },
-
-  bottomControls: { paddingTop: 20 },
-  startBtn: {
-    backgroundColor: '#00E5FF',
-    borderRadius: 14,
-    paddingVertical: 18,
-    alignItems: 'center',
-  },
-  startBtnText: { color: '#000', fontSize: 18, fontWeight: '800' },
-  activeControls: { flexDirection: 'row', gap: 12 },
-  resetBtn: {
-    flex: 1,
-    backgroundColor: '#1a1a1a',
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-  resetBtnText: { color: '#888', fontSize: 16, fontWeight: '700' },
-  stopBtn: {
-    flex: 2,
-    backgroundColor: '#F44336',
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  stopBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  safe: { flex: 1, backgroundColor: BG },
+  container: { flex: 1, padding: 16 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
+  back: { color: ORANGE, fontSize: 18, fontWeight: '700', width: 60 },
+  title: { color: '#fff', fontSize: 20, fontWeight: '900' },
+  tabs: { flexDirection: 'row', gap: 8, marginBottom: 20 },
+  tab: { flex: 1, backgroundColor: '#1a1a1a', borderRadius: 12, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: '#333' },
+  tabActive: { backgroundColor: ORANGE, borderColor: ORANGE },
+  tabEmoji: { fontSize: 22, marginBottom: 4 },
+  tabLabel: { color: '#888', fontSize: 11, fontWeight: '700', textAlign: 'center' },
+  tabLabelActive: { color: '#000' },
+  cameraWrap: { flex: 1, borderRadius: 20, overflow: 'hidden', marginBottom: 20, backgroundColor: '#1a1a1a' },
+  cameraPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  exerciseEmoji: { fontSize: 80 },
+  counterOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 24, alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)' },
+  countNum: { fontSize: 80, fontWeight: '900', color: ORANGE, lineHeight: 90 },
+  countLabel: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 4 },
+  calories: { color: '#888', fontSize: 14 },
+  controls: { flexDirection: 'row', gap: 12 },
+  btn: { flex: 1, padding: 18, borderRadius: 16, alignItems: 'center' },
+  btnStart: { backgroundColor: ORANGE },
+  btnStop: { backgroundColor: '#ef4444' },
+  btnText: { color: '#000', fontSize: 18, fontWeight: '900' },
+  btnReset: { backgroundColor: '#1a1a1a', padding: 18, borderRadius: 16, alignItems: 'center', borderWidth: 1, borderColor: '#333' },
+  btnResetText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  permText: { color: '#555', textAlign: 'center', marginTop: 8, fontSize: 13 },
 });
