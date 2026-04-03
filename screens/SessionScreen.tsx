@@ -42,11 +42,10 @@ function getChant(streak: number): string | null {
 
 interface SessionScreenProps {
   navigation: any;
-  route: { params: { profile: PlayerProfile } };
-}
+  }
 
-export default function SessionScreen({ navigation, route }: SessionScreenProps) {
-  const { profile } = route.params;
+export default function SessionScreen({ navigate }: { navigate: (s: any, data?: any) => void }) {
+  const profile = null;
   const facing: CameraType = 'back';
   const [hasPermission, setHasPermission] = React.useState<boolean|null>(null);
   React.useEffect(() => { Camera.requestCameraPermissionsAsync().then(({granted}) => setHasPermission(granted)); }, []);
